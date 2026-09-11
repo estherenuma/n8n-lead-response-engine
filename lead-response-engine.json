@@ -1,0 +1,777 @@
+{
+  "name": "lead-response-engine",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "f246bb51-8f53-45c4-b84c-59189f3cae8a",
+        "options": {
+          "allowedOrigins": ""
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1216,
+        96
+      ],
+      "id": "f0f492a1-9a72-4063-8041-2ce86880dbbb",
+      "name": "Webhook",
+      "webhookId": "f246bb51-8f53-45c4-b84c-59189f3cae8a"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "0de75a2b-fcf9-4097-ac1c-ce707451569b",
+              "name": "lead_id",
+              "value": "={{ $execution.id }}",
+              "type": "string"
+            },
+            {
+              "id": "d5d9a42e-faae-4039-996f-c9f642edb905",
+              "name": "lead_name",
+              "value": "={{ $json.body.name }}",
+              "type": "string"
+            },
+            {
+              "id": "1b272373-d386-4310-9f7b-97bd0f055ade",
+              "name": "lead_email",
+              "value": "={{ $json.body.email.toLowerCase().trim() }}",
+              "type": "string"
+            },
+            {
+              "id": "18767889-8e04-4195-a0e5-34e66f165404",
+              "name": "lead_phone",
+              "value": "={{ $json.body.phone }}",
+              "type": "string"
+            },
+            {
+              "id": "25c98dec-ee9d-46d8-afa9-190b96490cbf",
+              "name": "lead_message",
+              "value": "={{ $json.body.message }}",
+              "type": "string"
+            },
+            {
+              "id": "eaca3595-af71-42be-83e8-9a1b67a0bef5",
+              "name": "lead_budget",
+              "value": "={{ $json.body.budget || \"Not sure yet\" }}",
+              "type": "string"
+            },
+            {
+              "id": "5aa1b2aa-987b-44b6-8688-ce888b2d1641",
+              "name": "lead_source",
+              "value": "={{ $json.body.source }}",
+              "type": "string"
+            },
+            {
+              "id": "35bc66d2-8777-43f8-af4d-33998ea7af6f",
+              "name": "received_at",
+              "value": "={{ $now }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        -992,
+        96
+      ],
+      "id": "2f4b897e-0de0-4009-a14b-e43773c0ca0c",
+      "name": "Normalise the lead"
+    },
+    {
+      "parameters": {
+        "model": "openai/gpt-oss-120b",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        -480,
+        336
+      ],
+      "id": "07554fc7-4195-4eaa-8f74-f8c7b235a82d",
+      "name": "Groq Chat Model",
+      "credentials": {
+        "groqApi": {
+          "id": "UbphRVVYvZMfDyfi",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "",
+          "cachedResultUrl": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "",
+          "cachedResultUrl": ""
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -768,
+        96
+      ],
+      "id": "e077260f-903a-4e7f-8fa1-7f5eea9780dd",
+      "name": "Log the raw lead"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You classify inbound business enquiries. Read the enquiry and return JSON only, with no commentary and no code fences.\n\n \nReturn exactly these keys:\nintent — one of: buy_now, price_question, product_question, complaint, partnership, job_application, spam, other\nscore — an integer 1 to 10 for how likely this person is to buy soon\nurgency — one of: high, medium, low\nsummary — one sentence, under 20 words\nsuggested_reply — a warm reply under 80 words that answers what was asked, asks one qualifying question, and does not invent prices or delivery dates\n\nRules: if the message mentions a deadline, an event date, or a quantity, score it 7 or higher. If it is generic praise with no question, score it 3 or lower. If it is clearly automated marketing, return spam and score 1.\n\nWeigh the budget alongside the message and never on its own. A budget of 3m to 10m or Over 10m, attached to a specific room or a timeline, scores 8 or higher. Treat \"Not sure yet\" as neutral rather than weak — a serious client redoing a whole apartment often genuinely does not know the figure yet — and score it on how specific the message is.\n\nEnquiry: {{ $json['Lead Message'] }}\nBudget range given: {{ $json['Lead Budget'] }}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        -544,
+        96
+      ],
+      "id": "2a36851f-fd56-4331-ad1f-7f7820f97cac",
+      "name": "Classify intent and urgency"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Node 5 — Parse and guard the AI output.\n// This node must never throw. Whatever the model returns, it emits one item\n// carrying every field the nodes downstream expect.\n\nconst ALLOWED_INTENTS = [\n  'buy_now', 'price_question', 'product_question', 'complaint',\n  'partnership', 'job_application', 'spam', 'other'\n];\nconst ALLOWED_URGENCY = ['high', 'medium', 'low'];\n\nconst FALLBACK_REPLY = 'Thank you for getting in touch about your project. '\n  + 'We have your enquiry and one of our designers will come back to you shortly '\n  + 'with next steps. If it is urgent, just reply to this email and we will pick '\n  + 'it up straight away.';\n\n// Carry the normalised lead through, so Nodes 7, 8 and 9 keep their fields.\nconst lead = $('Normalise the lead').first().json;\n\n// 1. Find the model's text wherever this version of n8n put it.\nconst raw = $json.text ?? $json.output ?? $json.response ?? $json.message?.content ?? '';\nconst modelText = typeof raw === 'string' ? raw : JSON.stringify(raw);\n\n// 2. Strip code fences and any prose sitting either side of the JSON object.\nfunction extractJson(s) {\n  const cleaned = s.replace(/```(?:json)?/gi, '').trim();\n  const first = cleaned.indexOf('{');\n  const last = cleaned.lastIndexOf('}');\n  if (first === -1 || last === -1 || last < first) return null;\n  return cleaned.slice(first, last + 1);\n}\n\nlet parsed = null;\nlet parseOk = false;\n\ntry {\n  const candidate = (raw && typeof raw === 'object' && !Array.isArray(raw))\n    ? raw\n    : JSON.parse(extractJson(modelText));\n  if (candidate && typeof candidate === 'object') {\n    parsed = candidate;\n    parseOk = true;\n  }\n} catch (e) {\n  parsed = null;\n  parseOk = false;\n}\n\nconst p = parsed || {};\n\n// 3. Score: coerce to a number, round it, clamp it to 1-10, default 5.\nlet score = Number(String(p.score ?? '').replace(/[^0-9.\\-]/g, ''));\nif (!Number.isFinite(score)) score = 5;\nscore = Math.min(10, Math.max(1, Math.round(score)));\n\n// 4. Intent and urgency must come from the allowed lists or be replaced.\nconst intentRaw = String(p.intent ?? '').toLowerCase().trim().replace(/[\\s-]+/g, '_');\nconst intent = ALLOWED_INTENTS.includes(intentRaw) ? intentRaw : 'other';\n\nconst urgencyRaw = String(p.urgency ?? '').toLowerCase().trim();\nconst urgency = ALLOWED_URGENCY.includes(urgencyRaw) ? urgencyRaw : 'medium';\n\n// 5. Text fields: non-empty strings only, trimmed and length-capped.\nfunction textOr(value, fallback, max) {\n  const s = typeof value === 'string' ? value.trim() : '';\n  return (s || fallback).slice(0, max);\n}\n\nconst summary = textOr(p.summary, 'Enquiry received, not yet classified.', 200);\nconst suggested_reply = textOr(p.suggested_reply, FALLBACK_REPLY, 1200);\n\n// 6. Spam is score 1 by definition, whatever number the model attached to it.\nconst finalScore = intent === 'spam' ? 1 : score;\n\nreturn [{\n  json: {\n    ...lead,\n    intent,\n    score: finalScore,\n    urgency,\n    summary,\n    suggested_reply,\n    ai_ok: parseOk,\n    ai_raw: parseOk ? '' : modelText.slice(0, 500)\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -192,
+        96
+      ],
+      "id": "c64a7b5c-87fc-4a20-8bed-ee4b232084e5",
+      "name": "Parse and guard the AI output"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "8a0d9da6-eb6b-4509-8da7-f68feb95c76e",
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "spam",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "drop"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.score }}",
+                    "rightValue": 8,
+                    "operator": {
+                      "type": "number",
+                      "operation": "gte"
+                    },
+                    "id": "aabd4412-2a7e-4449-9639-91177e6d63d2"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "hot"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "64489a28-d596-470c-9e0b-fb929bc1071c",
+                    "leftValue": "={{ $json.score }}",
+                    "rightValue": 4,
+                    "operator": {
+                      "type": "number",
+                      "operation": "gte"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "warm"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "6adff91a-06a5-4b36-a12e-3a915c025e7d",
+                    "leftValue": "={{ $json.score }}",
+                    "rightValue": 3,
+                    "operator": {
+                      "type": "number",
+                      "operation": "lt"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "cold"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        32,
+        48
+      ],
+      "id": "9f00c070-56ec-4253-a07f-a535fb02e946",
+      "name": "Route by score"
+    },
+    {
+      "parameters": {
+        "sendTo": "aithalix@gmail.com",
+        "subject": "=Hot lead — {{ $('Normalise the lead').first().json.lead_name }} — {{ $('Parse and guard the AI output').first().json.score }}/10 — {{ $('Normalise the lead').first().json.lead_budget }}",
+        "message": "=<div style=\"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.5;color:#1a1a1a;max-width:600px;\">\n\n  <div style=\"font-size:20px;font-weight:600;margin-bottom:4px;\">{{ $('Normalise the lead').first().json.lead_name }}</div>\n  <div style=\"color:#6b6b66;margin-bottom:20px;\">{{ $('Parse and guard the AI output').first().json.summary }}</div>\n\n  <table cellpadding=\"0\" cellspacing=\"0\" style=\"width:100%;border-collapse:collapse;\">\n    <tr>\n      <td style=\"padding:8px 0;color:#6b6b66;width:110px;\">Phone</td>\n      <td style=\"padding:8px 0;\"><a href=\"tel:{{ $('Normalise the lead').first().json.lead_phone }}\" style=\"color:#1a5fd0;text-decoration:none;font-weight:600;\">{{ $('Normalise the lead').first().json.lead_phone }}</a></td>\n    </tr>\n    <tr>\n      <td style=\"padding:8px 0;color:#6b6b66;\">Email</td>\n      <td style=\"padding:8px 0;\"><a href=\"mailto:{{ $('Normalise the lead').first().json.lead_email }}\" style=\"color:#1a5fd0;text-decoration:none;\">{{ $('Normalise the lead').first().json.lead_email }}</a></td>\n    </tr>\n    <tr>\n      <td style=\"padding:8px 0;color:#6b6b66;\">Budget</td>\n      <td style=\"padding:8px 0;font-weight:600;\">{{ $('Normalise the lead').first().json.lead_budget }}</td>\n    </tr>\n    <tr>\n      <td style=\"padding:8px 0;color:#6b6b66;\">Score</td>\n      <td style=\"padding:8px 0;font-weight:600;\">{{ $('Parse and guard the AI output').first().json.score }}/10 &nbsp;&middot;&nbsp; {{ $('Parse and guard the AI output').first().json.intent }} &nbsp;&middot;&nbsp; {{ $('Parse and guard the AI output').first().json.urgency }} urgency</td>\n    </tr>\n    <tr>\n      <td style=\"padding:8px 0;color:#6b6b66;\">Source</td>\n      <td style=\"padding:8px 0;\">{{ $('Normalise the lead').first().json.lead_source }}</td>\n    </tr>\n  </table>\n\n  <div style=\"margin-top:20px;padding:16px;background-color:#f6f6f4;border-left:3px solid #d4d4ce;font-size:15px;line-height:1.6;white-space:pre-line;\">{{ $('Normalise the lead').first().json.lead_message }}</div>\n\n  <div style=\"margin-top:20px;padding-top:16px;border-top:1px solid #e6e6e2;font-size:13px;color:#8a8a85;\">\n    Ava replied automatically at {{ $now.toFormat('HH:mm') }}. Lead ID {{ $('Normalise the lead').first().json.lead_id }}.\n  </div>\n\n</div>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        -96
+      ],
+      "id": "1fac2091-261f-4178-abeb-b85b8967b61c",
+      "name": "Owner Alert",
+      "webhookId": "277b5fff-57aa-40ec-9200-231e84251869",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "zr0TRobZDvGq9zvD",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "1d8MKdC97YhfyHWkK_B9fDwL5FpOLqeIpAPPd6PRd88w",
+          "mode": "list",
+          "cachedResultName": "Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1d8MKdC97YhfyHWkK_B9fDwL5FpOLqeIpAPPd6PRd88w/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1d8MKdC97YhfyHWkK_B9fDwL5FpOLqeIpAPPd6PRd88w/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Intent": "={{ $('Parse and guard the AI output').first().json.intent }}",
+            "Score": "={{ $('Parse and guard the AI output').first().json.score }}",
+            "Replied At": "={{ $now.toISO() }}",
+            "lead_id": "={{ $('Normalise the lead').first().json.lead_id }}",
+            "Status": "={{ $json.Status }}"
+          },
+          "matchingColumns": [
+            "lead_id"
+          ],
+          "schema": [
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Received At",
+              "displayName": "Received At",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Lead Name",
+              "displayName": "Lead Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Lead Email ",
+              "displayName": "Lead Email ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Lead Phone",
+              "displayName": "Lead Phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Lead Budget",
+              "displayName": "Lead Budget",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Lead Source ",
+              "displayName": "Lead Source ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Lead Message",
+              "displayName": "Lead Message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Intent",
+              "displayName": "Intent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Score",
+              "displayName": "Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Replied At",
+              "displayName": "Replied At",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "cellFormat": "RAW"
+        }
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        928,
+        96
+      ],
+      "id": "9c843746-52ec-4851-bc6e-0d4dbd79eaca",
+      "name": "Update the lead row"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c2d0d3d5-ee43-422f-b6eb-73e8580e812c",
+              "name": "Status",
+              "value": "replied ",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        704,
+        0
+      ],
+      "id": "c0c1129b-2dc2-4260-b213-6bd9476e54a6",
+      "name": "Stamp as replied"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c2d0d3d5-ee43-422f-b6eb-73e8580e812c",
+              "name": "Status",
+              "value": "logged",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        704,
+        272
+      ],
+      "id": "2b74ac78-da54-410d-b210-0bdd452ccb62",
+      "name": "Stamp as logged"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.lead_email }}",
+        "subject": "=Thanks for getting in touch, {{ $('Normalise the lead').first().json.lead_name.split(' ')[0] }}",
+        "message": "=<div style=\"font-size:16px;line-height:1.6;color:#1a1a1a;margin-bottom:16px;\">Hi {{ $('Normalise the lead').first().json.lead_name.split(' ')[0] }},</div>\n\n<div style=\"margin:0;padding:24px 0;background-color:#f6f6f4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;\">\n  <div style=\"max-width:560px;margin:0 auto;padding:32px;background-color:#ffffff;border-radius:8px;\">\n\n    <div style=\"font-size:16px;line-height:1.6;color:#1a1a1a;white-space:pre-line;\">{{ $('Parse and guard the AI output').first().json.suggested_reply }}</div>\n\n    <div style=\"margin-top:28px;font-size:16px;line-height:1.6;color:#1a1a1a;\">\n      Warm regards,<br />\n      <strong>Lagos Luxe Interiors</strong>\n    </div>\n\n    <div style=\"margin-top:32px;padding-top:20px;border-top:1px solid #e6e6e2;font-size:13px;line-height:1.5;color:#8a8a85;\">\n      You're receiving this because you enquired through our website. Just reply to this email and it comes straight to us.\n    </div>\n\n  </div>\n</div>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        256,
+        -96
+      ],
+      "id": "541c7371-0913-4ea6-bf9c-c402936ed2da",
+      "name": "Send the instant reply (hot)",
+      "webhookId": "19145a05-0c65-4150-8aa9-5ca66d4d7640",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "zr0TRobZDvGq9zvD",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.lead_email }}",
+        "subject": "=Thanks for getting in touch, {{ $('Normalise the lead').first().json.lead_name.split(' ')[0] }}",
+        "message": "=<div style=\"font-size:16px;line-height:1.6;color:#1a1a1a;margin-bottom:16px;\">Hi {{ $('Normalise the lead').first().json.lead_name.split(' ')[0] }},</div>\n\n<div style=\"margin:0;padding:24px 0;background-color:#f6f6f4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;\">\n  <div style=\"max-width:560px;margin:0 auto;padding:32px;background-color:#ffffff;border-radius:8px;\">\n\n    <div style=\"font-size:16px;line-height:1.6;color:#1a1a1a;white-space:pre-line;\">{{ $('Parse and guard the AI output').first().json.suggested_reply }}</div>\n\n    <div style=\"margin-top:28px;font-size:16px;line-height:1.6;color:#1a1a1a;\">\n      Warm regards,<br />\n      <strong>Lagos Luxe Interiors</strong>\n    </div>\n\n    <div style=\"margin-top:32px;padding-top:20px;border-top:1px solid #e6e6e2;font-size:13px;line-height:1.5;color:#8a8a85;\">\n      You're receiving this because you enquired through our website. Just reply to this email and it comes straight to us.\n    </div>\n\n  </div>\n</div>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        96
+      ],
+      "id": "4250db77-5376-4179-a210-c9c5e440302c",
+      "name": "Send the instant reply (hot)1",
+      "webhookId": "da690d76-1aa3-4f39-bf7a-a4b1b2b473fc",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "zr0TRobZDvGq9zvD",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "headers": {
+            "content-type": "application/json"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "name": "Chidi Nwosu",
+            "email": "Chidi.Nwosu@Example.com ",
+            "phone": "+2348023456789",
+            "message": "We are redoing the master bedroom and the guest bedroom in our Lekki flat. Do you handle bedrooms as well as living rooms, and roughly how long does a two-room project take?",
+            "budget": "Not sure yet",
+            "source": "instagram",
+            "hp_field_x": ""
+          },
+          "executionMode": "test"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalise the lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalise the lead": {
+      "main": [
+        [
+          {
+            "node": "Log the raw lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Classify intent and urgency",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log the raw lead": {
+      "main": [
+        [
+          {
+            "node": "Classify intent and urgency",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify intent and urgency": {
+      "main": [
+        [
+          {
+            "node": "Parse and guard the AI output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse and guard the AI output": {
+      "main": [
+        [
+          {
+            "node": "Route by score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by score": {
+      "main": [
+        [
+          {
+            "node": "Stamp as logged",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send the instant reply (hot)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send the instant reply (hot)1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stamp as logged",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stamp as logged",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Owner Alert": {
+      "main": [
+        [
+          {
+            "node": "Stamp as replied",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stamp as replied": {
+      "main": [
+        [
+          {
+            "node": "Update the lead row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stamp as logged": {
+      "main": [
+        [
+          {
+            "node": "Update the lead row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send the instant reply (hot)": {
+      "main": [
+        [
+          {
+            "node": "Owner Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send the instant reply (hot)1": {
+      "main": [
+        [
+          {
+            "node": "Stamp as replied",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "ea849a7d-ef37-4105-ae97-fe0b0bc68d9e",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "de47d2a38a5bcd8d7f4a926f59575325c0883ef65b7837964085dfbbfa8fbbcb"
+  },
+  "nodeGroups": [],
+  "id": "7i5ZoM37zakhhnnT",
+  "tags": []
+}
